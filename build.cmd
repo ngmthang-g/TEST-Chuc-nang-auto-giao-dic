@@ -17,7 +17,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 if errorlevel 1 exit /b 1
 
 echo [2/6] Build Auto Trade bridge DLL...
-zig c++ -target x86_64-windows-gnu -O2 -std=c++17 -Wall -Wextra -Werror -shared -s ^
+zig c++ -target x86_64-windows-gnu -O2 -std=c++17 -Wall -Wextra -Werror -Wno-unused-function -shared -s ^
   src\bridge.cpp -luser32 -lkernel32 -o dist\ThanLongAutoTradeTestBridge.dll
 if errorlevel 1 exit /b 1
 
@@ -33,7 +33,7 @@ popd
 if errorlevel 1 exit /b 1
 
 echo [5/6] Build controller EXE...
-zig c++ -target x86_64-windows-gnu -O2 -std=c++17 -Wall -Wextra -Werror -municode -static -s ^
+zig c++ -target x86_64-windows-gnu -O2 -std=c++17 -Wall -Wextra -Werror -Wno-unused-function -municode -static -s ^
   src\controller.cpp dist\app.res -Wl,--subsystem,windows ^
   -lcomctl32 -luser32 -lkernel32 -lgdi32 ^
   -o dist\ThanLongAutoTradeTest_v0.1.0.exe
