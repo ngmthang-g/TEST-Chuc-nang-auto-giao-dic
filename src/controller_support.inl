@@ -12,7 +12,7 @@ using namespace autotradetest;
 
 namespace {
 
-constexpr wchar_t kTitle[] = L"Thần Long Auto Giao Dịch Test v0.1.0";
+constexpr wchar_t kTitle[] = L"Thần Long Auto Giao Dịch Test v0.1.1";
 constexpr wchar_t kGameModule[] = L"GameAssembly.dll";
 constexpr wchar_t kBridgeDll[] = L"ThanLongAutoTradeTestBridge.dll";
 constexpr UINT_PTR kTradePollTimer = 9100;
@@ -98,6 +98,24 @@ std::vector<GameClient> FindClients() {
     return clients;
 }
 
+const wchar_t* StageName(LONG stage) {
+    switch (static_cast<BridgeStage>(stage)) {
+        case BridgeStage::Idle: return L"IDLE";
+        case BridgeStage::HookEntered: return L"HOOK_ENTERED";
+        case BridgeStage::RequestAccepted: return L"REQUEST_ACCEPTED";
+        case BridgeStage::Il2CppReady: return L"IL2CPP_READY";
+        case BridgeStage::MainThreadProof: return L"MAINTHREAD_PROOF";
+        case BridgeStage::SemanticCall: return L"SEMANTIC_CALL";
+        case BridgeStage::ScanPlayers: return L"SCAN_PLAYERS";
+        case BridgeStage::SelectTarget: return L"SELECT_TARGET/TRADE";
+        case BridgeStage::ReadTradeConstants: return L"READ_TRADE_CONSTANTS";
+        case BridgeStage::SendTradePacket: return L"SEND_TRADE_PACKET";
+        case BridgeStage::QueryTradeUi: return L"QUERY_TRADE_UI";
+        case BridgeStage::ResponseReady: return L"RESPONSE_READY";
+        default: return L"UNKNOWN";
+    }
+}
+
 class BridgeClient {
 public:
     ~BridgeClient() { Close(); }
@@ -126,6 +144,7 @@ public:
         shared_->protocolVersion = kProtocolVersion;
         shared_->targetPid = game.pid;
         shared_->targetWindowThreadId = game.threadId;
+        shared_->stage = static_cast<LONG>(BridgeStage::Idle);
 
         const std::wstring dllPath = ExeDir() + L"\\" + kBridgeDll;
         localDll_ = LoadLibraryW(dllPath.c_str());
@@ -181,6 +200,7 @@ public:
         shared_->request = {};
         shared_->request.command = static_cast<std::uint32_t>(command);
         shared_->request.roleId = roleId;
+        InterlockedExchange(&shared_->stage, static_cast<LONG>(BridgeStage::Idle));
         MemoryBarrier();
         InterlockedExchange(&shared_->requestSeq, next);
         if (!PostThreadMessageW(game_.threadId, kWakeMessage, 0, 0)) {
@@ -200,7 +220,13 @@ public:
             }
             Sleep(5);
         }
-        error = L"Bridge timeout; không tự retry action";
+        MemoryBarrier();
+        error = L"Bridge timeout; loaded=" + std::to_wstring(shared_->bridgeLoaded) +
+                L" busy=" + std::to_wstring(shared_->bridgeBusy) +
+                L" callbackSeq=" + std::to_wstring(shared_->callbackSeq) +
+                L" requestSeq=" + std::to_wstring(next) +
+                L" stage=" + StageName(shared_->stage) +
+                L"(" + std::to_wstring(shared_->stage) + L"); không tự retry";
         return false;
     }
 
