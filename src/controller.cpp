@@ -3,10 +3,10 @@
 
 namespace {
 
-struct TeamMember {
+struct NearbyPlayer {
     std::uint64_t roleId = 0;
     std::wstring name;
-    std::wstring mapId;
+    std::wstring source;
 };
 
 class App {
@@ -70,12 +70,12 @@ private:
         applyFont(Make(L"BUTTON", L"TEST BRIDGE", BS_PUSHBUTTON,
                        650, 38, 110, 30, IDC_PROBE));
 
-        applyFont(Make(L"STATIC", L"ĐỒNG ĐỘI — lấy trực tiếp từ C_TeamData.TeamMember",
-                       0, 18, 84, 430, 22, 0));
-        teamCombo_ = Make(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL,
-                          18, 108, 615, 260, IDC_TEAM);
-        applyFont(teamCombo_);
-        applyFont(Make(L"BUTTON", L"QUÉT ĐỒNG ĐỘI", BS_PUSHBUTTON,
+        applyFont(Make(L"STATIC", L"NGƯỜI GẦN — direct GetNearByPeacePlayers, không cần tổ đội",
+                       0, 18, 84, 470, 22, 0));
+        playerCombo_ = Make(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL,
+                            18, 108, 615, 260, IDC_TEAM);
+        applyFont(playerCombo_);
+        applyFont(Make(L"BUTTON", L"QUÉT NGƯỜI GẦN", BS_PUSHBUTTON,
                        645, 107, 115, 30, IDC_TEAM_SCAN));
 
         applyFont(Make(L"STATIC",
@@ -94,11 +94,11 @@ private:
         applyFont(status_);
 
         applyFont(Make(L"STATIC",
-                       L"Sau khi gửi yêu cầu, acc bên kia phải chấp nhận. Tool chỉ test mở giao dịch, không tự nhận/chuyển đồ/xác nhận.",
+                       L"v0.1.1 bỏ LuaEnv.DoString. Timeout sẽ ghi stage chính xác; không tự retry/spam request.",
                        0, 18, 311, 742, 22, 0));
 
         log_ = Make(L"EDIT",
-                    L"v0.1.0 — Auto Trade semantic test; không SendInput/không click tọa độ.\r\n",
+                    L"v0.1.1 — direct semantic Auto Trade; không DoString/SendInput/click tọa độ.\r\n",
                     WS_BORDER | ES_MULTILINE | ES_READONLY | WS_VSCROLL | ES_AUTOVSCROLL,
                     18, 339, 742, 190, IDC_LOG);
         applyFont(log_);
@@ -120,15 +120,15 @@ private:
         tradePollCount_ = 0;
     }
 
-    void ClearTeam() {
+    void ClearPlayers() {
         StopTradePoll();
-        team_.clear();
-        SendMessageW(teamCombo_, CB_RESETCONTENT, 0, 0);
+        players_.clear();
+        SendMessageW(playerCombo_, CB_RESETCONTENT, 0, 0);
     }
 
     void ScanClients() {
         bridge_.Close();
-        ClearTeam();
+        ClearPlayers();
         clients_ = FindClients();
         SendMessageW(clientCombo_, CB_RESETCONTENT, 0, 0);
         for (const auto& client : clients_) {
@@ -148,12 +148,12 @@ private:
         const GameClient& client = clients_[static_cast<std::size_t>(index)];
         if (bridge_.AttachedTo(client.pid)) return true;
         if (!bridge_.Attach(client, error)) return false;
-        Log(L"Đã attach PID " + std::to_wstring(client.pid) + L" bằng AutoTrade test bridge");
+        Log(L"Đã attach PID " + std::to_wstring(client.pid) + L" bằng AutoTrade v0.1.1 bridge");
         return true;
     }
 
     bool Call(Command command, std::uint64_t roleId, Response& response,
-              std::wstring& error, DWORD timeoutMs = 2500) {
+              std::wstring& error, DWORD timeoutMs = 3000) {
         if (!EnsureAttach(error)) return false;
         return bridge_.Call(command, roleId, response, error, timeoutMs);
     }
@@ -161,17 +161,18 @@ private:
     void Probe() {
         std::wstring error;
         Response response{};
-        if (!Call(Command::Probe, 0, response, error, 2500)) {
-            SetControlText(status_, L"BRIDGE/LUA: FAIL");
+        if (!Call(Command::Probe, 0, response, error, 1500)) {
+            SetControlText(status_, L"HOOK/BRIDGE: FAIL");
             Log(L"PROBE FAIL: " + error);
             return;
         }
-        SetControlText(status_, L"BRIDGE + UNITY MAIN THREAD + LUAENV: PASS");
-        Log(response.detail[0] ? response.detail : L"Bridge probe PASS");
-        if (response.data[0]) Log(std::wstring(L"Runtime constants: ") + response.data);
+        SetControlText(status_, L"HOOK + SHARED MEMORY: PASS");
+        Log(response.detail[0] ? response.detail : L"Hook probe PASS");
+        if (response.data[0]) Log(std::wstring(L"Probe: ") + response.data);
+        Log(L"Probe v0.1.1 cố ý không gọi IL2CPP/Lua; bấm QUÉT NGƯỜI GẦN để test semantic runtime.");
     }
 
-    static bool ParseTeamLine(const std::wstring& line, TeamMember& member) {
+    static bool ParsePlayerLine(const std::wstring& line, NearbyPlayer& player) {
         const std::size_t tab1 = line.find(L'\t');
         if (tab1 == std::wstring::npos) return false;
         const std::size_t tab2 = line.find(L'\t', tab1 + 1);
@@ -180,18 +181,18 @@ private:
         wchar_t* end = nullptr;
         const unsigned long long role = std::wcstoull(roleText.c_str(), &end, 10);
         if (!role || !end || *end != 0) return false;
-        member.roleId = static_cast<std::uint64_t>(role);
-        member.name = line.substr(tab1 + 1, tab2 - tab1 - 1);
-        member.mapId = line.substr(tab2 + 1);
-        while (!member.mapId.empty() && (member.mapId.back() == L'\r' || member.mapId.back() == L'\n')) {
-            member.mapId.pop_back();
+        player.roleId = static_cast<std::uint64_t>(role);
+        player.name = line.substr(tab1 + 1, tab2 - tab1 - 1);
+        player.source = line.substr(tab2 + 1);
+        while (!player.source.empty() && (player.source.back() == L'\r' || player.source.back() == L'\n')) {
+            player.source.pop_back();
         }
         return true;
     }
 
-    void LoadTeamFromText(const wchar_t* text) {
-        team_.clear();
-        SendMessageW(teamCombo_, CB_RESETCONTENT, 0, 0);
+    void LoadPlayersFromText(const wchar_t* text) {
+        players_.clear();
+        SendMessageW(playerCombo_, CB_RESETCONTENT, 0, 0);
         if (!text || !*text) return;
         const std::wstring all(text);
         std::size_t start = 0;
@@ -199,82 +200,84 @@ private:
             const std::size_t end = all.find(L'\n', start);
             const std::wstring line = all.substr(start,
                 end == std::wstring::npos ? std::wstring::npos : end - start);
-            TeamMember member{};
-            if (ParseTeamLine(line, member)) {
-                team_.push_back(member);
-                const std::wstring label = (member.name.empty() ? L"(không tên)" : member.name) +
-                    L"  |  RoleID " + std::to_wstring(member.roleId) +
-                    L"  |  Map " + (member.mapId.empty() ? L"?" : member.mapId);
-                SendMessageW(teamCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+            NearbyPlayer player{};
+            if (ParsePlayerLine(line, player)) {
+                players_.push_back(player);
+                const std::wstring label = (player.name.empty() ? L"(không tên)" : player.name) +
+                    L"  |  RoleID " + std::to_wstring(player.roleId) + L"  |  AOI";
+                SendMessageW(playerCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
             }
             if (end == std::wstring::npos) break;
             start = end + 1;
         }
-        if (!team_.empty()) SendMessageW(teamCombo_, CB_SETCURSEL, 0, 0);
+        if (!players_.empty()) SendMessageW(playerCombo_, CB_SETCURSEL, 0, 0);
     }
 
-    void QueryTeam() {
+    void QueryPlayers() {
         StopTradePoll();
         std::wstring error;
         Response response{};
-        if (!Call(Command::QueryTeam, 0, response, error, 2500)) {
-            SetControlText(status_, L"QUÉT ĐỒNG ĐỘI: FAIL");
-            Log(L"TEAM SCAN FAIL: " + error);
+        if (!Call(Command::QueryTeam, 0, response, error, 4000)) {
+            SetControlText(status_, L"QUÉT NGƯỜI GẦN: FAIL");
+            Log(L"NEARBY SCAN FAIL: " + error);
             return;
         }
-        LoadTeamFromText(response.data);
-        if (team_.empty()) {
-            SetControlText(status_, L"TEAM: KHÔNG CÓ ĐỒNG ĐỘI KHÁC");
-            Log(L"TEAM: C_TeamData đọc được nhưng danh sách đồng đội khác đang rỗng");
+        LoadPlayersFromText(response.data);
+        if (players_.empty()) {
+            SetControlText(status_, L"NGƯỜI GẦN: API PASS NHƯNG DANH SÁCH RỖNG");
+            Log(L"NEARBY PASS nhưng GetNearByPeacePlayers hiện không trả record usable trong AOI");
         } else {
-            SetControlText(status_, L"TEAM: ĐÃ QUÉT " + std::to_wstring(team_.size()) + L" ĐỒNG ĐỘI");
-            Log(L"TEAM PASS: " + std::to_wstring(team_.size()) + L" thành viên khác từ C_TeamData");
+            SetControlText(status_, L"NGƯỜI GẦN: ĐÃ QUÉT " + std::to_wstring(players_.size()) + L" NGƯỜI");
+            Log(L"NEARBY PASS: " + std::to_wstring(players_.size()) + L" người từ GetNearByPeacePlayers");
+            if (response.detail[0]) Log(std::wstring(L"Scanner: ") + response.detail);
         }
     }
 
-    const TeamMember* SelectedMember() const {
-        const int index = static_cast<int>(SendMessageW(teamCombo_, CB_GETCURSEL, 0, 0));
-        if (index < 0 || index >= static_cast<int>(team_.size())) return nullptr;
-        return &team_[static_cast<std::size_t>(index)];
+    const NearbyPlayer* SelectedPlayer() const {
+        const int index = static_cast<int>(SendMessageW(playerCombo_, CB_GETCURSEL, 0, 0));
+        if (index < 0 || index >= static_cast<int>(players_.size())) return nullptr;
+        return &players_[static_cast<std::size_t>(index)];
     }
 
     void SelectTargetOnly() {
         StopTradePoll();
-        const TeamMember* member = SelectedMember();
-        if (!member) {
-            SetControlText(status_, L"TARGET: CHƯA CHỌN ĐỒNG ĐỘI");
-            Log(L"TARGET: hãy QUÉT ĐỒNG ĐỘI và chọn một người trước");
+        const NearbyPlayer* player = SelectedPlayer();
+        if (!player) {
+            SetControlText(status_, L"TARGET: CHƯA CHỌN NGƯỜI");
+            Log(L"TARGET: hãy QUÉT NGƯỜI GẦN và chọn một người trước");
             return;
         }
         std::wstring error;
         Response response{};
-        if (!Call(Command::SelectTarget, member->roleId, response, error, 2500)) {
+        if (!Call(Command::SelectTarget, player->roleId, response, error, 3500)) {
             SetControlText(status_, L"TARGET: FAIL");
-            Log(L"TARGET FAIL RoleID " + std::to_wstring(member->roleId) + L": " + error);
+            Log(L"TARGET FAIL RoleID " + std::to_wstring(player->roleId) + L": " + error);
             return;
         }
         SetControlText(status_, L"TARGET: PASS • RoleID " + std::to_wstring(response.selectedRoleId));
         Log(L"TARGET PASS: " + std::wstring(response.data));
+        if (response.detail[0]) Log(std::wstring(L"Target proof: ") + response.detail);
     }
 
     void SendTrade() {
         StopTradePoll();
-        const TeamMember* member = SelectedMember();
-        if (!member) {
-            SetControlText(status_, L"GIAO DỊCH: CHƯA CHỌN ĐỒNG ĐỘI");
-            Log(L"TRADE: hãy QUÉT ĐỒNG ĐỘI và chọn một người trước");
+        const NearbyPlayer* player = SelectedPlayer();
+        if (!player) {
+            SetControlText(status_, L"GIAO DỊCH: CHƯA CHỌN NGƯỜI");
+            Log(L"TRADE: hãy QUÉT NGƯỜI GẦN và chọn một người trước");
             return;
         }
         std::wstring error;
         Response response{};
-        if (!Call(Command::SelectAndTrade, member->roleId, response, error, 2500)) {
+        if (!Call(Command::SelectAndTrade, player->roleId, response, error, 4500)) {
             SetControlText(status_, L"TARGET + TRADE REQUEST: FAIL");
-            Log(L"TRADE FAIL RoleID " + std::to_wstring(member->roleId) + L": " + error);
+            Log(L"TRADE FAIL RoleID " + std::to_wstring(player->roleId) + L": " + error);
             return;
         }
         SetControlText(status_, L"TRADE REQUEST: ĐÃ GỬI • CHỜ ACC KIA CHẤP NHẬN");
         Log(L"TRADE REQUEST PASS: " + std::wstring(response.data));
-        Log(L"Đang tự check Trade UI trong khoảng 30 giây; không tự chấp nhận ở acc bên kia");
+        if (response.detail[0]) Log(std::wstring(L"Trade path: ") + response.detail);
+        Log(L"Đang tự check Trade UI khoảng 30 giây; không tự chấp nhận/chuyển đồ/xác nhận.");
         tradePollCount_ = 0;
         tradePollActive_ = SetTimer(hwnd_, kTradePollTimer, 750, nullptr) != 0;
         if (!tradePollActive_) Log(L"Không tạo được timer auto-check; dùng nút CHECK BẢNG TRADE thủ công");
@@ -283,7 +286,7 @@ private:
     void CheckTradeUi(bool manual) {
         std::wstring error;
         Response response{};
-        if (!Call(Command::QueryTradeUi, 0, response, error, 1800)) {
+        if (!Call(Command::QueryTradeUi, 0, response, error, 2500)) {
             if (manual || tradePollCount_ == 0) Log(L"TRADE UI CHECK FAIL: " + error);
             if (!manual) StopTradePoll();
             return;
@@ -296,7 +299,7 @@ private:
         }
         if (manual) {
             SetControlText(status_, L"TRADE UI: CHƯA PHÁT HIỆN");
-            Log(L"TRADE UI: CLOSED/không khớp candidate name");
+            Log(L"TRADE UI: CLOSED/không khớp candidate semantic name");
         }
     }
 
@@ -307,7 +310,7 @@ private:
         if (tradePollCount_ >= 40) {
             StopTradePoll();
             SetControlText(status_, L"TRADE UI: CHƯA PHÁT HIỆN SAU 30 GIÂY");
-            Log(L"TIMEOUT UI: không coi là bằng chứng packet fail; có thể acc kia chưa nhận hoặc tên Trade UI chưa đúng");
+            Log(L"TIMEOUT UI không chứng minh packet fail; có thể acc kia chưa nhận hoặc exact Trade UI name chưa được catalog.");
         }
     }
 
@@ -321,7 +324,7 @@ private:
                 switch (LOWORD(wp)) {
                     case IDC_SCAN: ScanClients(); break;
                     case IDC_PROBE: Probe(); break;
-                    case IDC_TEAM_SCAN: QueryTeam(); break;
+                    case IDC_TEAM_SCAN: QueryPlayers(); break;
                     case IDC_TARGET: SelectTargetOnly(); break;
                     case IDC_TRADE: SendTrade(); break;
                     case IDC_CHECK_UI: CheckTradeUi(true); break;
@@ -343,11 +346,11 @@ private:
 
     HWND hwnd_ = nullptr;
     HWND clientCombo_ = nullptr;
-    HWND teamCombo_ = nullptr;
+    HWND playerCombo_ = nullptr;
     HWND status_ = nullptr;
     HWND log_ = nullptr;
     std::vector<GameClient> clients_;
-    std::vector<TeamMember> team_;
+    std::vector<NearbyPlayer> players_;
     BridgeClient bridge_;
     bool tradePollActive_ = false;
     unsigned int tradePollCount_ = 0;
