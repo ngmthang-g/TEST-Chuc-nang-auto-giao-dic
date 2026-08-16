@@ -2,81 +2,144 @@
 
 Repo này chỉ dùng để kiểm chứng **một chức năng duy nhất**:
 
-> Tool có thể tự động đọc đồng đội, target đúng người bằng `RoleID`, gửi yêu cầu giao dịch bằng internal/semantic game path và nhận biết bảng giao dịch có mở hay không.
+> Tool có thể tự động quét người đang ở gần, target đúng người bằng `RoleID`, gửi yêu cầu giao dịch bằng internal/semantic game path và xác nhận bảng giao dịch có mở hay không.
 
 Không phát triển Auto Train, Auto Sell, Auto Buff, trị liệu, revive, chuyển đồ hay tính năng khác trong repo này.
 
-## Mục tiêu test v0.1.0
+## Trạng thái hiện tại — v0.1.1
 
-Luồng thử nghiệm:
+v0.1.0 build được nhưng runtime test thực tế trả:
 
 ```text
-quét client GameAssembly.dll
- -> attach bridge vào game thread
- -> chứng minh Unity main thread + LuaEnv
- -> đọc C_TeamData.TeamMember
- -> chọn một đồng đội
- -> Game.SelectTarget(RoleID)
- -> xác nhận Game.SelectedTarget.RoleID == RoleID
- -> đọc C_OtherRoleCommand.Trade và C_TradeCommand.Request trực tiếp từ Lua runtime
- -> Network.SendPacket(200051, Trade:Request:RoleID)
- -> acc bên kia chấp nhận yêu cầu giao dịch
- -> tool tự poll GUI.FindUI(...) để tìm Trade UI
+PROBE FAIL: Bridge timeout
+TEAM SCAN FAIL: Bridge timeout
 ```
 
-**Không dùng tọa độ màn hình, SendInput, mouse_event, UIButton.HandleClickEvent hay click chuột giả lập.**
+### Nguyên nhân kiến trúc của v0.1.0
 
-## Bằng chứng client đã dùng để xây PoC
+v0.1.0 đã đặt `LuaEnv.DoString(...)` trực tiếp trong request callback của `WH_GETMESSAGE` bridge. `completedSeq` chỉ được ghi sau khi Lua chunk trả về. Vì vậy nếu `DoString` mắc/block trong callback, controller chỉ thấy timeout và không biết request đã vào bridge đến đâu.
 
-Nguồn nghiên cứu: `ngmthang-g/clinent-game-than-long-DATA-2222`.
+### v0.1.1 sửa theo hướng fail-fast + semantic direct
 
-Đã VERIFIED trong knowledge base:
+`LuaEnv.DoString` đã bị loại khỏi source.
 
-- `C_TeamData.TeamMember[]` có `RoleID`, `RoleName`, `MapID`, HP/MaxHP và tọa độ dự phòng.
-- UI tổ đội chọn thành viên bằng `Game.SelectTarget(RoleID)`.
-- `Game.SelectedTarget.RoleID` dùng để xác nhận target hiện tại.
-- `C_OtherRoleCommand.Trade = 7`.
-- packet social action là `CMD_OTHER_ROLE_COMMAND = 200051`.
-- Lua gốc gửi lời mời giao dịch theo form `C_OtherRoleCommand.Trade:C_TradeCommand.Request:RoleID`.
-- `CMD_TRADE_DATA = 200053` tồn tại trong packet table, nhưng inbound Trade UI lifecycle chưa được knowledge base hiện tại mô tả đủ để hardcode.
+Luồng mới:
 
-Điểm cố ý **không hardcode**: numeric value của `C_TradeCommand.Request`. Tool đọc constant này từ Lua runtime của chính client trước khi gửi request.
+```text
+TEST BRIDGE
+ -> chỉ proof hook + shared memory + callback thread
+ -> KHÔNG gọi IL2CPP/Lua action
+
+QUÉT NGƯỜI GẦN
+ -> proof Unity main thread
+ -> direct IL2CPP GetNearByPeacePlayers(32)
+ -> copy RoleID + Name ra snapshot của tool
+
+TARGET
+ -> Game.SelectTarget(RoleID)
+ -> đọc Game.SelectedTarget
+ -> chỉ PASS khi SelectedTarget.RoleID == RoleID
+
+TRADE
+ -> target + proof lại RoleID
+ -> LuaSystemManager -> LuaEnv -> Global LuaTable
+ -> Global["C_OtherRoleCommand"]["Trade"]
+ -> Global["C_TradeCommand"]["Request"]
+ -> sanity guard Trade == 7
+ -> direct LuaSystemAPI_Network.SendPacket(200051, "Trade:Request:RoleID")
+
+TRADE UI
+ -> direct GUI.FindUI/MainFindUI candidate semantic names
+```
+
+Numeric `C_TradeCommand.Request` **không hardcode và không đoán**. v0.1.1 đọc giá trị runtime từ LuaTable hiện hành của chính client.
+
+## Vì sao đổi “Quét đồng đội” thành “Quét người gần”
+
+Knowledge base đã VERIFIED stock UI dùng:
+
+```text
+Game.GetNearByPeacePlayers(limit)
+```
+
+và mỗi record có ít nhất `RoleID`, `Name`, `Level`, `FactionID`, `HP`, `MaxHP`, `GuildName`, `AvartaID`, `TeamRank`.
+
+Stock UI cũng dùng chính `Game.SelectTarget(RoleID)`.
+
+Do đó test target/trade không cần ép hai nhân vật phải ở cùng tổ đội; điều kiện quan trọng là nhân vật đích đang trong AOI/client hiện biết tới.
+
+## Stage telemetry v0.1.1
+
+Nếu request vẫn timeout, log không còn chỉ ghi `Bridge timeout` mà kèm:
+
+```text
+loaded=<0/1>
+busy=<0/1>
+callbackSeq=<n>
+requestSeq=<n>
+stage=<NAME>(<number>)
+```
+
+Stage:
+
+| Stage | Ý nghĩa |
+|---|---|
+| `IDLE` | request chưa vào callback |
+| `HOOK_ENTERED` | hook đã thấy wake message |
+| `REQUEST_ACCEPTED` | bridge đã nhận request |
+| `IL2CPP_READY` | IL2CPP exports/resolver đã sẵn sàng |
+| `MAINTHREAD_PROOF` | đang/chưa qua Unity main-thread proof |
+| `SCAN_PLAYERS` | đang gọi/đọc nearby player collection |
+| `SELECT_TARGET/TRADE` | đang target/verify target |
+| `READ_TRADE_CONSTANTS` | đang đọc `Trade` + `Request` từ LuaTable |
+| `SEND_TRADE_PACKET` | đang gọi direct `SendPacket(200051, payload)` |
+| `QUERY_TRADE_UI` | đang kiểm tra Trade UI |
+| `RESPONSE_READY` | bridge đã hoàn tất response |
+
+Điều này cho phép lần test kế tiếp xác định chính xác tầng lỗi mà không retry/spam action.
 
 ## Cách build
 
-Yêu cầu Zig 0.14.1 trong PATH, sau đó chạy:
+Yêu cầu Zig 0.14.1 trong PATH:
 
 ```bat
 build.cmd
 ```
 
-Output:
+Output v0.1.1:
 
 ```text
-dist/ThanLongAutoTradeTest_v0.1.0.exe
+dist/ThanLongAutoTradeTest_v0.1.1.exe
 dist/ThanLongAutoTradeTestBridge.dll
 ```
 
-GitHub Actions cũng tự build và upload artifact `ThanLong-AutoTrade-Test-v0.1.0` sau mỗi push lên `main`.
+GitHub Actions upload artifact:
 
-## Cách test
+```text
+ThanLong-AutoTrade-Test-v0.1.1
+```
 
-1. Mở game và vào tổ đội với ít nhất một nhân vật khác.
-2. Hai nhân vật nên đứng gần nhau/cùng vùng AOI để `Game.SelectTarget(RoleID)` có target object hiện tại.
-3. Chạy `ThanLongAutoTradeTest_v0.1.0.exe` cùng mức quyền với game.
-4. `QUÉT CLIENT` và chọn PID cần test.
-5. Bấm `TEST BRIDGE`.
-   - PASS mong đợi: bridge + Unity main thread + LuaEnv.
-   - log sẽ in actual runtime `Trade=...` và `Request=...`.
-6. Bấm `QUÉT ĐỒNG ĐỘI` và chọn người cần giao dịch.
-7. Có thể bấm `1. TARGET NỘI BỘ` trước để test riêng target.
-8. Bấm `2. TARGET + GỬI GIAO DỊCH`.
-   - tool target lại đúng RoleID;
-   - chỉ khi target proof PASS mới gửi packet 200051.
-9. Ở acc bên kia, chấp nhận lời mời giao dịch nếu game hiển thị.
-10. Tool tự check Trade UI khoảng 30 giây; cũng có thể bấm `CHECK BẢNG TRADE` thủ công.
+## Cách test v0.1.1
 
-## Cách đọc kết quả
+1. Mở hai nhân vật và cho đứng gần nhau để cùng AOI.
+2. Chạy `ThanLongAutoTradeTest_v0.1.1.exe` cùng mức quyền với game.
+3. Chọn đúng PID.
+4. Bấm `TEST BRIDGE`.
+
+PASS bắt buộc:
+
+```text
+HOOK + SHARED MEMORY PASS
+HOOK_READY|NO_DOSTRING
+```
+
+Nếu bước này timeout thì lỗi vẫn nằm ở hook/wake/shared-memory, chưa liên quan IL2CPP/Game/Lua.
+
+5. Bấm `QUÉT NGƯỜI GẦN`.
+6. Chọn RoleID cần test.
+7. Bấm `1. TARGET NỘI BỘ`.
+8. Khi target PASS, bấm `2. TARGET + GỬI GIAO DỊCH`.
+9. Xem acc bên kia có nhận lời mời giao dịch không; nếu có, chấp nhận để kiểm tra bảng Trade.
 
 ### PASS target
 
@@ -84,36 +147,35 @@ GitHub Actions cũng tự build và upload artifact `ThanLong-AutoTrade-Test-v0.
 TARGET PASS: OK|TARGET=<RoleID>|NAME=<Name>
 ```
 
-Điều này chứng minh auto target semantic hoạt động, không dựa vào click người trên màn hình.
-
 ### PASS gửi request
 
-Log dạng:
-
 ```text
-OK|TARGET=<RoleID>|PACKET=200051|PAYLOAD=<Trade>:<Request>:<RoleID>
+TRADE REQUEST PASS: OK|TARGET=<RoleID>|PACKET=200051|PAYLOAD=7:<runtime Request>:<RoleID>
 ```
-
-Điều này chứng minh client-side path đã target đúng người và gọi `Network.SendPacket` với constants lấy trực tiếp từ Lua runtime.
 
 ### PASS bảng giao dịch
 
+Nếu candidate semantic UI name hiện tại khớp:
+
 ```text
-TRADE UI PASS: OPEN|<semantic-ui-name>
+TRADE UI PASS: OPEN|<ui-name>
 ```
 
-Đây là PASS cuối cho mục tiêu của repo.
+Nếu game đã mở bảng giao dịch thật nhưng tool vẫn báo UI CLOSED thì target/request vẫn có thể đã PASS; lúc đó chỉ còn targeted trace `CMD_TRADE_DATA = 200053 -> exact Trade UI/script name`.
 
-### Timeout không đồng nghĩa packet chắc chắn fail
+## Bằng chứng client dùng cho PoC
 
-Nếu sau 30 giây chưa phát hiện UI, cần phân biệt:
+Nguồn nghiên cứu: `ngmthang-g/clinent-game-than-long-DATA-2222`.
 
-- acc kia chưa chấp nhận/từ chối;
-- server từ chối request vì khoảng cách/trạng thái giao dịch;
-- request đã đúng nhưng tên Trade UI thực tế chưa nằm trong candidate list;
-- Trade UI lifecycle dùng `CMD_TRADE_DATA=200053` nhưng cần thêm một targeted runtime trace để xác định exact UI/script name.
+Đã VERIFIED:
 
-Không được coi `Sleep`/timeout là proof thành công hoặc thất bại của server.
+- `Game.GetNearByPeacePlayers(limit)` cung cấp structured nearby-player records.
+- `Game.SelectTarget(RoleID)` là stock target path.
+- `Game.SelectedTarget.RoleID` là target proof.
+- `C_OtherRoleCommand.Trade = 7`.
+- `CMD_OTHER_ROLE_COMMAND = 200051`.
+- Lua gốc gửi lời mời giao dịch theo form `C_OtherRoleCommand.Trade:C_TradeCommand.Request:RoleID`.
+- `CMD_TRADE_DATA = 200053` tồn tại trong packet table.
 
 ## Scope cố định
 
@@ -127,7 +189,7 @@ Repo này **không** tự:
 - spam lời mời;
 - điều khiển chuột/phím.
 
-Sau khi xác minh được `target -> request -> Trade UI open`, chức năng test coi như hoàn thành.
+Sau khi xác minh được `nearby player -> target -> request -> Trade UI open`, chức năng test coi như hoàn thành.
 
 ## Tài liệu kỹ thuật
 
