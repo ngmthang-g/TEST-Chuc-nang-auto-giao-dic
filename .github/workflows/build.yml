@@ -1,0 +1,32 @@
+name: Build Auto Trade Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.1
+
+      - name: Build and scope audit
+        shell: cmd
+        run: build.cmd
+
+      - name: Upload test binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ThanLong-AutoTrade-Test-v0.1.0
+          path: |
+            dist/ThanLongAutoTradeTest_v0.1.0.exe
+            dist/ThanLongAutoTradeTestBridge.dll
+          if-no-files-found: error
