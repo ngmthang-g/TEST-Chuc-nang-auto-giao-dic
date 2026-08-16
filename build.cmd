@@ -6,14 +6,15 @@ if errorlevel 1 (echo KHONG TIM THAY ZIG & exit /b 1)
 if not exist dist mkdir dist
 del /q dist\* >nul 2>nul
 
-echo [1/6] Auto Trade scope + semantic audit...
+echo [1/6] Auto Trade v0.1.1 scope + semantic audit...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop'; $files=(Get-ChildItem 'src' -Recurse -File | Where-Object {$_.Extension -in '.cpp','.h','.inl'} | Select-Object -ExpandProperty FullName); $s=($files|%%{Get-Content $_ -Raw -Encoding UTF8}) -join [Environment]::NewLine;" ^
-  "$forbidden=@('AutoFight','NPCShop','RequestSellItem','CMD_NPC_SHOP_SELL_REQUEST','CMD_REVIVE_DATA','RequestUsingSkill','UIButton','HandleClickEvent','CreateRemoteThread','WriteProcessMemory'); foreach($x in $forbidden){if($s -match [regex]::Escape($x)){throw ('Forbidden unrelated feature token: '+$x)}};" ^
+  "$forbidden=@('AutoFight','NPCShop','RequestSellItem','CMD_NPC_SHOP_SELL_REQUEST','CMD_REVIVE_DATA','RequestUsingSkill','UIButton','HandleClickEvent','CreateRemoteThread','WriteProcessMemory','DoString'); foreach($x in $forbidden){if($s -match [regex]::Escape($x)){throw ('Forbidden unrelated/blocking token: '+$x)}};" ^
   "foreach($rx in @('SendInput\s*\(','mouse_event\s*\(','SetCursorPos\s*\(','keybd_event\s*\(')){if($s -match $rx){throw ('Forbidden visual/input API: '+$rx)}};" ^
-  "$lua=Get-Content 'src/bridge_lua.inl' -Raw -Encoding UTF8; foreach($x in @('C_TeamData.TeamMember','Game.SelectTarget','C_OtherRoleCommand.Trade','C_TradeCommand.Request','Network.SendPacket(200051','LuaEnv','DoString')){if($lua -notmatch [regex]::Escape($x)){throw ('Missing Auto Trade semantic token: '+$x)}};" ^
-  "$proto=Get-Content 'src/protocol.h' -Raw -Encoding UTF8; foreach($x in @('QueryTeam = 2','SelectTarget = 3','SelectAndTrade = 4','QueryTradeUi = 5')){if($proto -notmatch [regex]::Escape($x)){throw ('Protocol missing '+$x)}};" ^
-  "Write-Host 'AUTO TRADE AUDIT PASS: team -> target -> runtime Trade/Request -> packet 200051 -> UI proof; no mouse macro/unrelated feature.'"
+  "$sem=Get-Content 'src/bridge_semantic.inl' -Raw -Encoding UTF8; foreach($x in @('GetNearByPeacePlayers','SelectTarget','SelectedTarget','C_OtherRoleCommand','C_TradeCommand','get_Item','SendPacket','200051','FindUI')){if($sem -notmatch [regex]::Escape($x)){throw ('Missing v0.1.1 semantic token: '+$x)}};" ^
+  "$proto=Get-Content 'src/protocol.h' -Raw -Encoding UTF8; foreach($x in @('0x00010100','QueryTeam = 2','SelectTarget = 3','SelectAndTrade = 4','QueryTradeUi = 5','callbackSeq','BridgeStage')){if($proto -notmatch [regex]::Escape($x)){throw ('Protocol missing '+$x)}};" ^
+  "$bridge=Get-Content 'src/bridge.cpp' -Raw -Encoding UTF8; if($bridge -notmatch 'HOOK_READY\|NO_DOSTRING'){throw 'Probe is not isolated/non-blocking'};" ^
+  "Write-Host 'AUTO TRADE v0.1.1 AUDIT PASS: nonblocking hook probe; direct nearby/target; targeted LuaTable constants; direct packet; no DoString/mouse.'"
 if errorlevel 1 exit /b 1
 
 echo [2/6] Build Auto Trade bridge DLL...
@@ -36,8 +37,8 @@ echo [5/6] Build controller EXE...
 zig c++ -target x86_64-windows-gnu -O2 -std=c++17 -Wall -Wextra -Werror -Wno-unused-function -municode -static -s ^
   src\controller.cpp dist\app.res -Wl,--subsystem,windows ^
   -lcomctl32 -luser32 -lkernel32 -lgdi32 ^
-  -o dist\ThanLongAutoTradeTest_v0.1.0.exe
+  -o dist\ThanLongAutoTradeTest_v0.1.1.exe
 if errorlevel 1 exit /b 1
 
 echo [6/6] Done.
-echo BUILD THANH CONG - AUTO TRADE TEST v0.1.0
+echo BUILD THANH CONG - AUTO TRADE TEST v0.1.1
