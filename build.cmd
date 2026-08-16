@@ -9,12 +9,12 @@ del /q dist\* >nul 2>nul
 echo [1/6] Auto Trade v0.1.1 scope + semantic audit...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop'; $files=(Get-ChildItem 'src' -Recurse -File | Where-Object {$_.Extension -in '.cpp','.h','.inl'} | Select-Object -ExpandProperty FullName); $s=($files|%%{Get-Content $_ -Raw -Encoding UTF8}) -join [Environment]::NewLine;" ^
-  "$forbidden=@('AutoFight','NPCShop','RequestSellItem','CMD_NPC_SHOP_SELL_REQUEST','CMD_REVIVE_DATA','RequestUsingSkill','UIButton','HandleClickEvent','CreateRemoteThread','WriteProcessMemory','DoString'); foreach($x in $forbidden){if($s -match [regex]::Escape($x)){throw ('Forbidden unrelated/blocking token: '+$x)}};" ^
-  "foreach($rx in @('SendInput\s*\(','mouse_event\s*\(','SetCursorPos\s*\(','keybd_event\s*\(')){if($s -match $rx){throw ('Forbidden visual/input API: '+$rx)}};" ^
+  "$forbidden=@('AutoFight','NPCShop','RequestSellItem','CMD_NPC_SHOP_SELL_REQUEST','CMD_REVIVE_DATA','RequestUsingSkill','UIButton','HandleClickEvent','CreateRemoteThread','WriteProcessMemory'); foreach($x in $forbidden){if($s -match [regex]::Escape($x)){throw ('Forbidden unrelated token: '+$x)}};" ^
+  "foreach($rx in @('DoString\s*\(','SendInput\s*\(','mouse_event\s*\(','SetCursorPos\s*\(','keybd_event\s*\(')){if($s -match $rx){throw ('Forbidden blocking/visual API call: '+$rx)}};" ^
   "$sem=Get-Content 'src/bridge_semantic.inl' -Raw -Encoding UTF8; foreach($x in @('GetNearByPeacePlayers','SelectTarget','SelectedTarget','C_OtherRoleCommand','C_TradeCommand','get_Item','SendPacket','200051','FindUI')){if($sem -notmatch [regex]::Escape($x)){throw ('Missing v0.1.1 semantic token: '+$x)}};" ^
   "$proto=Get-Content 'src/protocol.h' -Raw -Encoding UTF8; foreach($x in @('0x00010100','QueryTeam = 2','SelectTarget = 3','SelectAndTrade = 4','QueryTradeUi = 5','callbackSeq','BridgeStage')){if($proto -notmatch [regex]::Escape($x)){throw ('Protocol missing '+$x)}};" ^
   "$bridge=Get-Content 'src/bridge.cpp' -Raw -Encoding UTF8; if($bridge -notmatch 'HOOK_READY\|NO_DOSTRING'){throw 'Probe is not isolated/non-blocking'};" ^
-  "Write-Host 'AUTO TRADE v0.1.1 AUDIT PASS: nonblocking hook probe; direct nearby/target; targeted LuaTable constants; direct packet; no DoString/mouse.'"
+  "Write-Host 'AUTO TRADE v0.1.1 AUDIT PASS: nonblocking hook probe; direct nearby/target; targeted LuaTable constants; direct packet; no DoString call/mouse.'"
 if errorlevel 1 exit /b 1
 
 echo [2/6] Build Auto Trade bridge DLL...
