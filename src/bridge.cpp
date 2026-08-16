@@ -1,5 +1,5 @@
 #include "bridge_runtime.inl"
-#include "bridge_lua.inl"
+#include "bridge_semantic.inl"
 
 namespace {
 
@@ -11,8 +11,14 @@ bool StartsWith(const wchar_t* text, const wchar_t* prefix) {
     return true;
 }
 
-bool PrepareLuaMainThread(wchar_t* detail, std::size_t cap) {
+void SetStage(BridgeStage stage) {
+    if (g_shared) InterlockedExchange(&g_shared->stage, static_cast<LONG>(stage));
+}
+
+bool PrepareSemanticMainThread(wchar_t* detail, std::size_t cap) {
     if (!g_api.Load(detail, cap)) return false;
+    SetStage(BridgeStage::Il2CppReady);
+    SetStage(BridgeStage::MainThreadProof);
     if (!ProveUnityMainThread(detail, cap)) return false;
     return true;
 }
@@ -38,119 +44,126 @@ bool EnsureShared() {
     return true;
 }
 
+void FinishRequest(LONG seq, Response& response, bool ok,
+                   const wchar_t* detail, const wchar_t* data) {
+    response.ok = ok ? 1 : 0;
+    SetText(response.detail, _countof(response.detail), detail);
+    SetText(response.data, _countof(response.data), data);
+    g_shared->response = response;
+    MemoryBarrier();
+    SetStage(BridgeStage::ResponseReady);
+    InterlockedExchange(&g_shared->completedSeq, seq);
+    InterlockedExchange(&g_shared->bridgeBusy, 0);
+}
+
 void ProcessRequest() {
     if (!EnsureShared()) return;
     const LONG seq = g_shared->requestSeq;
     if (seq <= 0 || seq == g_shared->completedSeq) return;
+    InterlockedExchange(&g_shared->callbackSeq, seq);
+    SetStage(BridgeStage::HookEntered);
     if (InterlockedCompareExchange(&g_shared->bridgeBusy, 1, 0) != 0) return;
+    SetStage(BridgeStage::RequestAccepted);
 
     Response response{};
     response.callbackThreadId = GetCurrentThreadId();
     wchar_t detail[512]{};
     wchar_t data[4096]{};
     bool ok = false;
+    const Request request = g_shared->request;
 
     if (response.callbackThreadId != g_shared->targetWindowThreadId) {
         SetText(detail, _countof(detail), L"Sai callback thread; action bị chặn");
         response.errorCode = 1001;
-    } else if (!PrepareLuaMainThread(detail, _countof(detail))) {
-        response.errorCode = 1101;
-    } else {
-        const Request request = g_shared->request;
-        switch (static_cast<Command>(request.command)) {
-            case Command::Probe:
-                ok = RunLuaProbe(data, _countof(data), detail, _countof(detail));
-                if (ok) {
-                    SetText(detail, _countof(detail), L"Bridge + Unity main thread + LuaEnv PASS");
-                    response.errorCode = 0;
-                } else {
-                    response.errorCode = 1201;
-                }
-                break;
-
-            case Command::QueryTeam:
-                ok = RunQueryTeam(data, _countof(data), detail, _countof(detail));
-                if (ok) {
-                    SetText(detail, _countof(detail), data[0]
-                        ? L"Đã đọc C_TeamData.TeamMember từ Lua runtime"
-                        : L"Đọc team runtime thành công nhưng không có đồng đội khác");
-                    response.errorCode = 0;
-                } else {
-                    response.errorCode = 1301;
-                }
-                break;
-
-            case Command::SelectTarget:
-                if (!request.roleId) {
-                    SetText(detail, _countof(detail), L"RoleID bằng 0");
-                    response.errorCode = 1401;
-                    break;
-                }
-                if (!SafeForWorldAction(detail, _countof(detail))) {
-                    response.errorCode = 1402;
-                    break;
-                }
-                ok = RunSelectTarget(request.roleId, data, _countof(data), detail, _countof(detail));
-                if (ok && StartsWith(data, L"OK|")) {
-                    response.selectedRoleId = request.roleId;
-                    SetText(detail, _countof(detail), L"Game.SelectTarget(RoleID) đã trả đúng SelectedTarget");
-                    response.errorCode = 0;
-                } else {
-                    if (ok) SetText(detail, _countof(detail), data);
-                    ok = false;
-                    response.errorCode = 1403;
-                }
-                break;
-
-            case Command::SelectAndTrade:
-                if (!request.roleId) {
-                    SetText(detail, _countof(detail), L"RoleID bằng 0");
-                    response.errorCode = 1501;
-                    break;
-                }
-                if (!SafeForWorldAction(detail, _countof(detail))) {
-                    response.errorCode = 1502;
-                    break;
-                }
-                ok = RunSelectAndTrade(request.roleId, data, _countof(data), detail, _countof(detail));
-                if (ok && StartsWith(data, L"OK|")) {
-                    response.selectedRoleId = request.roleId;
-                    SetText(detail, _countof(detail), L"Đã target đúng người và gửi Trade Request nội bộ");
-                    response.errorCode = 0;
-                } else {
-                    if (ok) SetText(detail, _countof(detail), data);
-                    ok = false;
-                    response.errorCode = 1503;
-                }
-                break;
-
-            case Command::QueryTradeUi:
-                ok = RunQueryTradeUi(data, _countof(data), detail, _countof(detail));
-                if (ok) {
-                    response.tradeUiVisible = StartsWith(data, L"OPEN|") ? 1 : 0;
-                    SetText(detail, _countof(detail), response.tradeUiVisible
-                        ? L"Phát hiện Trade UI đang mở"
-                        : L"Chưa phát hiện Trade UI trong candidate semantic names");
-                    response.errorCode = 0;
-                } else {
-                    response.errorCode = 1601;
-                }
-                break;
-
-            default:
-                SetText(detail, _countof(detail), L"Command không hợp lệ");
-                response.errorCode = 1002;
-                break;
-        }
+        FinishRequest(seq, response, false, detail, data);
+        return;
     }
 
-    response.ok = ok ? 1 : 0;
-    SetText(response.detail, _countof(response.detail), detail);
-    SetText(response.data, _countof(response.data), data);
-    g_shared->response = response;
-    MemoryBarrier();
-    InterlockedExchange(&g_shared->completedSeq, seq);
-    InterlockedExchange(&g_shared->bridgeBusy, 0);
+    // v0.1.1: Probe is deliberately non-blocking. It proves only the Windows hook,
+    // shared mapping and callback thread. Heavy IL2CPP/Lua work must never hide this proof.
+    if (static_cast<Command>(request.command) == Command::Probe) {
+        ok = true;
+        response.errorCode = 0;
+        SetText(detail, _countof(detail), L"HOOK + SHARED MEMORY PASS; callback đã vào bridge DLL");
+        SetText(data, _countof(data), L"HOOK_READY|NO_DOSTRING");
+        FinishRequest(seq, response, ok, detail, data);
+        return;
+    }
+
+    if (!PrepareSemanticMainThread(detail, _countof(detail))) {
+        response.errorCode = 1101;
+        FinishRequest(seq, response, false, detail, data);
+        return;
+    }
+
+    SetStage(BridgeStage::SemanticCall);
+    switch (static_cast<Command>(request.command)) {
+        case Command::QueryTeam:
+            SetStage(BridgeStage::ScanPlayers);
+            ok = RunQueryTeam(data, _countof(data), detail, _countof(detail));
+            response.errorCode = ok ? 0 : 1301;
+            break;
+
+        case Command::SelectTarget:
+            if (!request.roleId) {
+                SetText(detail, _countof(detail), L"RoleID bằng 0");
+                response.errorCode = 1401;
+                break;
+            }
+            if (!SafeForWorldAction(detail, _countof(detail))) {
+                response.errorCode = 1402;
+                break;
+            }
+            SetStage(BridgeStage::SelectTarget);
+            ok = RunSelectTarget(request.roleId, data, _countof(data), detail, _countof(detail));
+            if (ok && StartsWith(data, L"OK|")) {
+                response.selectedRoleId = request.roleId;
+                response.errorCode = 0;
+            } else {
+                ok = false;
+                response.errorCode = 1403;
+            }
+            break;
+
+        case Command::SelectAndTrade:
+            if (!request.roleId) {
+                SetText(detail, _countof(detail), L"RoleID bằng 0");
+                response.errorCode = 1501;
+                break;
+            }
+            if (!SafeForWorldAction(detail, _countof(detail))) {
+                response.errorCode = 1502;
+                break;
+            }
+            SetStage(BridgeStage::SelectTarget);
+            ok = RunSelectAndTrade(request.roleId, data, _countof(data), detail, _countof(detail));
+            if (ok && StartsWith(data, L"OK|")) {
+                response.selectedRoleId = request.roleId;
+                response.errorCode = 0;
+            } else {
+                ok = false;
+                response.errorCode = 1503;
+            }
+            break;
+
+        case Command::QueryTradeUi:
+            SetStage(BridgeStage::QueryTradeUi);
+            ok = RunQueryTradeUi(data, _countof(data), detail, _countof(detail));
+            if (ok) {
+                response.tradeUiVisible = StartsWith(data, L"OPEN|") ? 1 : 0;
+                response.errorCode = 0;
+            } else {
+                response.errorCode = 1601;
+            }
+            break;
+
+        default:
+            SetText(detail, _countof(detail), L"Command không hợp lệ");
+            response.errorCode = 1002;
+            break;
+    }
+
+    FinishRequest(seq, response, ok, detail, data);
 }
 
 } // namespace
