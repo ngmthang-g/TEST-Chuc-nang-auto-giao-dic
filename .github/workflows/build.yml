@@ -25,8 +25,8 @@ jobs:
       - name: Upload test binaries
         uses: actions/upload-artifact@v4
         with:
-          name: ThanLong-AutoTrade-Test-v0.1.0
+          name: ThanLong-AutoTrade-Test-v0.1.1
           path: |
-            dist/ThanLongAutoTradeTest_v0.1.0.exe
+            dist/ThanLongAutoTradeTest_v0.1.1.exe
             dist/ThanLongAutoTradeTestBridge.dll
           if-no-files-found: error
