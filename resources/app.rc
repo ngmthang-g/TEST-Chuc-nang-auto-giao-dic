@@ -1,8 +1,8 @@
 #include <windows.h>
 1 RT_MANIFEST "app.manifest"
 1 VERSIONINFO
-FILEVERSION 0,1,0,0
-PRODUCTVERSION 0,1,0,0
+FILEVERSION 0,1,1,0
+PRODUCTVERSION 0,1,1,0
 FILEFLAGSMASK 0x3fL
 FILEOS 0x40004L
 FILETYPE 0x1L
@@ -13,11 +13,11 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "Thang Nguyen\0"
       VALUE "FileDescription", "Than Long Auto Trade Test\0"
-      VALUE "FileVersion", "0.1.0.0\0"
+      VALUE "FileVersion", "0.1.1.0\0"
       VALUE "InternalName", "ThanLongAutoTradeTest\0"
-      VALUE "OriginalFilename", "ThanLongAutoTradeTest_v0.1.0.exe\0"
+      VALUE "OriginalFilename", "ThanLongAutoTradeTest_v0.1.1.exe\0"
       VALUE "ProductName", "Than Long Auto Trade Test\0"
-      VALUE "ProductVersion", "0.1.0.0\0"
+      VALUE "ProductVersion", "0.1.1.0\0"
     END
   END
   BLOCK "VarFileInfo"
