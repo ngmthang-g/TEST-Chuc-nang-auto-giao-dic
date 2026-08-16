@@ -6,7 +6,7 @@
 namespace autotradetest {
 
 constexpr std::uint32_t kMagic = 0x44525454u; // TTRD
-constexpr std::uint32_t kProtocolVersion = 0x00010000u;
+constexpr std::uint32_t kProtocolVersion = 0x00010100u;
 constexpr UINT kWakeMessage = WM_APP + 0x532;
 constexpr wchar_t kMappingPrefix[] = L"Local\\ThanLongAutoTradeTest_";
 
@@ -17,6 +17,21 @@ enum class Command : std::uint32_t {
     SelectTarget = 3,
     SelectAndTrade = 4,
     QueryTradeUi = 5,
+};
+
+enum class BridgeStage : LONG {
+    Idle = 0,
+    HookEntered = 1,
+    RequestAccepted = 2,
+    Il2CppReady = 10,
+    MainThreadProof = 20,
+    SemanticCall = 30,
+    ScanPlayers = 40,
+    SelectTarget = 50,
+    ReadTradeConstants = 60,
+    SendTradePacket = 70,
+    QueryTradeUi = 80,
+    ResponseReady = 90,
 };
 
 struct Request {
@@ -43,6 +58,8 @@ struct SharedBlock {
     volatile LONG completedSeq = 0;
     volatile LONG bridgeLoaded = 0;
     volatile LONG bridgeBusy = 0;
+    volatile LONG callbackSeq = 0;
+    volatile LONG stage = static_cast<LONG>(BridgeStage::Idle);
     Request request{};
     Response response{};
 };
