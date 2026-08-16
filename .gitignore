@@ -1,0 +1,6 @@
+dist/
+*.exe
+*.dll
+*.res
+*.o
+*.obj
