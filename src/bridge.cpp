@@ -56,6 +56,32 @@ void FinishRequest(LONG seq, Response& response, bool ok,
     InterlockedExchange(&g_shared->bridgeBusy, 0);
 }
 
+bool ExecuteTradeRequest(std::uint64_t roleId, wchar_t* data, std::size_t dataCap,
+                         wchar_t* detail, std::size_t detailCap) {
+    Il2CppObject* selected = nullptr;
+    SetStage(BridgeStage::SelectTarget);
+    if (!DirectSelectTarget(roleId, selected, detail, detailCap)) return false;
+    RootHandle selectedRoot;
+    (void)selectedRoot.Hold(selected);
+
+    std::uint64_t trade = 0;
+    std::uint64_t request = 0;
+    SetStage(BridgeStage::ReadTradeConstants);
+    if (!ReadTradeConstants(trade, request, detail, detailCap)) return false;
+
+    SetStage(BridgeStage::SendTradePacket);
+    if (!SendOtherRoleTradePacket(roleId, trade, request, detail, detailCap)) return false;
+
+    std::swprintf(data, dataCap, L"OK|TARGET=%llu|PACKET=200051|PAYLOAD=%llu:%llu:%llu",
+                  static_cast<unsigned long long>(roleId),
+                  static_cast<unsigned long long>(trade),
+                  static_cast<unsigned long long>(request),
+                  static_cast<unsigned long long>(roleId));
+    SetText(detail, detailCap,
+            L"Target proof PASS + LuaTable Trade/Request constants PASS + direct SendPacket PASS");
+    return true;
+}
+
 void ProcessRequest() {
     if (!EnsureShared()) return;
     const LONG seq = g_shared->requestSeq;
@@ -79,8 +105,7 @@ void ProcessRequest() {
         return;
     }
 
-    // v0.1.1: Probe is deliberately non-blocking. It proves only the Windows hook,
-    // shared mapping and callback thread. Heavy IL2CPP/Lua work must never hide this proof.
+    // Probe is deliberately non-blocking. It proves only the hook/mapping/callback path.
     if (static_cast<Command>(request.command) == Command::Probe) {
         ok = true;
         response.errorCode = 0;
@@ -135,8 +160,7 @@ void ProcessRequest() {
                 response.errorCode = 1502;
                 break;
             }
-            SetStage(BridgeStage::SelectTarget);
-            ok = RunSelectAndTrade(request.roleId, data, _countof(data), detail, _countof(detail));
+            ok = ExecuteTradeRequest(request.roleId, data, _countof(data), detail, _countof(detail));
             if (ok && StartsWith(data, L"OK|")) {
                 response.selectedRoleId = request.roleId;
                 response.errorCode = 0;
