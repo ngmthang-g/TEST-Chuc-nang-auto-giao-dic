@@ -6,6 +6,11 @@ on:
     paths:
       - 'tools/ImageRegionClickTest/**'
       - '.github/workflows/build-image-region-click-test.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'tools/ImageRegionClickTest/**'
+      - '.github/workflows/build-image-region-click-test.yml'
   workflow_dispatch:
 
 jobs:
