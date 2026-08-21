@@ -1,0 +1,47 @@
+name: build-item-consolidator-v0.6.1.6
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify v0.6.1.6 hidden-action and route safety scope
+        run: python tools/verify_v0616_logic.py
+      - name: Configure x64
+        run: cmake -S . -B build -A x64
+      - name: Build Release
+        run: cmake --build build --config Release --parallel
+      - name: Route logic self-test
+        run: .\build\Release\route_logic_tests.exe
+      - name: Rotation logic self-test
+        run: .\build\Release\rotation_logic_tests.exe
+      - name: Shared coordinator self-test
+        run: .\build\Release\trade_coordinator_logic_tests.exe
+      - name: Background UI scoring self-test
+        run: .\build\Release\background_ui_logic_tests.exe
+      - name: Fixed-slot sell logic self-test
+        run: .\build\Release\fixed_slot_sell_logic_tests.exe
+      - name: Unity geometry resolver self-test
+        run: .\build\Release\unity_geometry_logic_tests.exe
+      - name: Internal UI point-click plan self-test
+        run: .\build\Release\internal_ui_click_logic_tests.exe
+      - name: AutoPath and AutoFight invariant self-test
+        run: .\build\Release\travel_fight_guard_logic_tests.exe
+      - name: Stage artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force stage | Out-Null
+          Copy-Item build\Release\ThanLongItemConsolidator.exe stage\ThanLongItemConsolidator_v0.6.1.6.exe
+          Copy-Item build\Release\ThanLongCleanRouteBridge.dll stage\ThanLongCleanRouteBridge.dll
+          Copy-Item README.md,PROJECT_KNOWLEDGE.md,CHANGELOG.md,VERSION.txt,SOURCE_PROVENANCE.md,TOOL_LOGIC_TABLE.html,DONOR_0.8.4_BACKGROUND_ACTION_ANALYSIS.md stage\
+          Copy-Item docs stage\docs -Recurse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ThanLongItemConsolidator-v0.6.1.6-win-x64
+          path: stage
+          if-no-files-found: error
