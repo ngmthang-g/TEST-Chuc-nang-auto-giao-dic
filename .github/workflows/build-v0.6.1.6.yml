@@ -3,6 +3,7 @@ name: build-than-long-v0.6.1.6
 on:
   push:
     branches:
+      - main
       - codex/v0.6.1.6-test-giao-dic
     paths:
       - '.github/workflows/build-v0.6.1.6.yml'
