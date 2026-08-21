@@ -1,0 +1,13 @@
+ThanLong Item Consolidator v0.6.1 - Windows x64
+
+Source commit: 3cfa93474100e0e3ebcd5e9b6f60491c6848a0a0
+GitHub Actions run: 32388213200 (workflow run 276)
+Artifact ID: 9413784891
+
+862b3690bb37d186462fbb3ea1d96308ed4e092d60f0d08586675c5441114949  ThanLongItemConsolidator-v0.6.1-win-x64.zip
+858b38504630b28618054cfbb3c075c267cfb0b824bb1662f9edf179f9eee491  ThanLongItemConsolidator_v0.6.1.exe
+e21c79a707c3cf1308e2160c1657b82ecf95ab7ba982b7a11fcbb689f4f32181  ThanLongCleanRouteBridge.dll
+
+Build verification: MSVC x64 build PASS; route, rotation, trade coordinator,
+background UI scoring and v0.6.1 capability audits PASS.
+Runtime status: RUNTIME UNTESTED on the user's exact live game client.
