@@ -1,0 +1,109 @@
+name: build-than-long-v0.6.1.6
+
+on:
+  push:
+    branches:
+      - codex/v0.6.1.6-test-giao-dic
+    paths:
+      - '.github/workflows/build-v0.6.1.6.yml'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch exact v0.6.1.6 source
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch codex/v0.6.1.6-per-client-clean-movement-guard https://github.com/ngmthang-g/TEST-chuc-nang-than-long-2.git upstream
+          $checks = @(
+            @{ Path = 'VERSION.txt'; Blob = 'e0ad60c87bc86ed82d556a89e9a7c055d8ad0462' },
+            @{ Path = 'CMakeLists.txt'; Blob = 'b66beb509770007cb53454ee01aeef830dc6fa37' },
+            @{ Path = '.github/workflows/build.yml'; Blob = '52abd19c49a8e1dbcab2ed94095d4512ba3b95ac' },
+            @{ Path = 'src/controller.cpp'; Blob = 'ffc5a6a475e43205266b3c34c9c079667e037a3c' },
+            @{ Path = 'src/bridge.cpp'; Blob = '4ce9f5f69a15aca4b2ca3c3f6223d91f91aa77f2' },
+            @{ Path = 'tools/verify_v0616_logic.py'; Blob = '17c8dcbc931e626714cc780ab3b50c9dd8bc896a' },
+            @{ Path = 'src/travel_fight_guard_logic.h'; Blob = '24982d22aa54362bd8d5fd04efa27cfada7986de' },
+            @{ Path = 'README.md'; Blob = '51698b8189e8b21d490a162c4f784136928b88e5' }
+          )
+          foreach ($c in $checks) {
+            $actual = (git -C upstream hash-object -- $c.Path).Trim()
+            if ($actual -ne $c.Blob) {
+              throw "Source mismatch: $($c.Path) expected=$($c.Blob) actual=$actual"
+            }
+          }
+          Write-Host 'v0.6.1.6 source identity checks PASS'
+
+      - name: Sync source snapshot into this repository
+        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        shell: pwsh
+        run: |
+          $dest = 'source-v0.6.1.6'
+          if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Get-ChildItem upstream -Force | Where-Object { $_.Name -ne '.git' } | ForEach-Object {
+            Copy-Item $_.FullName -Destination $dest -Recurse -Force
+          }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- source-v0.6.1.6
+          $changes = git status --porcelain -- source-v0.6.1.6
+          if ($changes) {
+            git commit -m 'Sync v0.6.1.6 source snapshot'
+            git push origin "HEAD:$env:GITHUB_REF_NAME"
+          } else {
+            Write-Host 'Source snapshot already up to date'
+          }
+
+      - name: Verify v0.6.1.6 logic
+        run: python upstream/tools/verify_v0616_logic.py
+
+      - name: Configure x64
+        run: cmake -S upstream -B build -A x64
+
+      - name: Build Release
+        run: cmake --build build --config Release --parallel
+
+      - name: Route logic self-test
+        run: .\build\Release\route_logic_tests.exe
+      - name: Rotation logic self-test
+        run: .\build\Release\rotation_logic_tests.exe
+      - name: Shared coordinator self-test
+        run: .\build\Release\trade_coordinator_logic_tests.exe
+      - name: Background UI scoring self-test
+        run: .\build\Release\background_ui_logic_tests.exe
+      - name: Fixed-slot sell logic self-test
+        run: .\build\Release\fixed_slot_sell_logic_tests.exe
+      - name: Unity geometry resolver self-test
+        run: .\build\Release\unity_geometry_logic_tests.exe
+      - name: Internal UI point-click plan self-test
+        run: .\build\Release\internal_ui_click_logic_tests.exe
+      - name: AutoPath and AutoFight invariant self-test
+        run: .\build\Release\travel_fight_guard_logic_tests.exe
+
+      - name: Stage artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force stage | Out-Null
+          Copy-Item build\Release\ThanLongItemConsolidator.exe stage\ThanLongItemConsolidator_v0.6.1.6.exe
+          Copy-Item build\Release\ThanLongCleanRouteBridge.dll stage\ThanLongCleanRouteBridge.dll
+          Copy-Item upstream\README.md,upstream\PROJECT_KNOWLEDGE.md,upstream\CHANGELOG.md,upstream\VERSION.txt,upstream\SOURCE_PROVENANCE.md,upstream\TOOL_LOGIC_TABLE.html,upstream\DONOR_0.8.4_BACKGROUND_ACTION_ANALYSIS.md stage\
+          Copy-Item upstream\docs stage\docs -Recurse
+          Compress-Archive -Path upstream\* -DestinationPath stage\ThanLongItemConsolidator_Source_v0.6.1.6.zip -Force
+
+      - name: Upload Windows x64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ThanLongItemConsolidator-v0.6.1.6-win-x64
+          path: stage
+          if-no-files-found: error
